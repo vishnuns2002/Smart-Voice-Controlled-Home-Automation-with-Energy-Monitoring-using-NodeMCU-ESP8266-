@@ -1,150 +1,219 @@
-# Smart Voice-Controlled Home Automation with Energy Monitoring
+#include <ESP8266WiFi.h>
+#include <EEPROM.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include "SinricPro.h"
+#include "SinricProSwitch.h"
 
-## 📌 Project Overview
-This project demonstrates an **IoT-based Smart Home Automation System** using **NodeMCU (ESP8266)**.  
-The system allows users to control household appliances remotely using **voice commands or a mobile application**.  
-It also provides **energy monitoring and estimated electricity bill calculation**, displayed on an **LCD screen**.
+// LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-The project integrates **NodeMCU, relay modules, bulbs, LCD display, and push buttons** to create a functional smart home prototype.
+// WiFi
+#define WIFI_SSID "hashim"
+#define WIFI_PASS "123456788"
 
----
+// Sinric
+#define APP_KEY "6e93649d-b994-458e-b519-b55ef9e38d43"
+#define APP_SECRET "21ecac83-77d2-49db-aaf4-5a269543da6d-86b1ccd9-d662-4aa8-aca0-747af36124d9"
 
-## 🎯 Objectives
-- To control home appliances remotely using IoT technology.
-- To integrate **voice control using Google Assistant or Alexa**.
-- To allow **manual switching using push buttons**.
-- To display appliance status and energy usage on an **LCD display**.
-- To estimate electricity consumption and bill.
+// Device IDs
+#define device_ID_1 "69dd0ad5ad44f4047dfd46ea"
+#define device_ID_2 "69dd0af8a221de787933cfd4"
+#define device_ID_3 "69dd0b19ad44f4047dfd472a"
 
----
+// Relay pins
+#define RELAY_PIN_1 D1
+#define RELAY_PIN_2 D2
+#define RELAY_PIN_3 D3
 
-## 🧰 Components Used
+// Buttons
+#define DISPLAY_BTN D5
+#define RESET_BTN D4
 
-| Component | Quantity |
-|----------|---------|
-| NodeMCU (ESP8266) | 1 |
-| 3-Channel Relay Module | 1 |
-| 16x2 LCD Display (I2C) | 1 |
-| Push Buttons | 2 |
-| Bulbs (Load) | 3 |
-| Jumper Wires | As required |
-| Power Supply (5V/USB) | 1 |
+// Energy settings
+#define BULB_POWER 1.0
+#define RATE 8.0
 
----
+// EEPROM addresses
+#define ADDR1 0
+#define ADDR2 10
+#define ADDR3 20
 
-## 🧠 Working Principle
-1. The **NodeMCU (ESP8266)** connects to Wi-Fi and communicates with the **Sinric Pro cloud platform**.
-2. The user sends a **voice command through Google Assistant or Alexa**.
-3. The command is processed by the cloud server and sent to the **NodeMCU**.
-4. The NodeMCU activates the **relay module** to control connected appliances.
-5. Each relay controls one bulb independently.
-6. The system estimates **energy consumption and electricity bill**.
-7. The **LCD display** shows appliance status and energy usage.
-8. **Push buttons** provide manual control if internet connectivity is unavailable.
+// Variables
+unsigned long start1 = 0, start2 = 0, start3 = 0;
+float energy1 = 0, energy2 = 0, energy3 = 0;
 
----
+// Display mode toggle
+int displayMode = 0;
+bool lastButtonState = HIGH;
 
-## 🔌 Block Diagram
+// ===== BULB CONTROL =====
+bool onPowerState1(const String &deviceId, bool &state) {
+  if (state) {
+    digitalWrite(RELAY_PIN_1, LOW);
+    start1 = millis();
+  } else {
+    digitalWrite(RELAY_PIN_1, HIGH);
+    float hours = (millis() - start1) / 3600000.0;
+    energy1 += BULB_POWER * hours;
 
-Google Assistant / Alexa
-↓
-Internet
-↓
-Sinric Pro Cloud
-↓
-WiFi
-↓
-NodeMCU ESP8266
-↓
-Relay Module
-↓ ↓ ↓
-Bulb1 Bulb2 Bulb3
+    EEPROM.put(ADDR1, energy1);
+    EEPROM.commit();
 
-Additional Connections:
-NodeMCU → LCD Display
-NodeMCU → Push Buttons
+    Serial.print("Bulb1 Energy: ");
+    Serial.println(energy1);
+  }
+  return true;
+}
 
+bool onPowerState2(const String &deviceId, bool &state) {
+  if (state) {
+    digitalWrite(RELAY_PIN_2, LOW);
+    start2 = millis();
+  } else {
+    digitalWrite(RELAY_PIN_2, HIGH);
+    float hours = (millis() - start2) / 3600000.0;
+    energy2 += BULB_POWER * hours;
 
----
+    EEPROM.put(ADDR2, energy2);
+    EEPROM.commit();
 
-## ⚡ Energy Calculation
-Energy consumption is calculated using the formula:
+    Serial.print("Bulb2 Energy: ");
+    Serial.println(energy2);
+  }
+  return true;
+}
 
-Energy (E) = Power (P) × Time (t)
+bool onPowerState3(const String &deviceId, bool &state) {
+  if (state) {
+    digitalWrite(RELAY_PIN_3, LOW);
+    start3 = millis();
+  } else {
+    digitalWrite(RELAY_PIN_3, HIGH);
+    float hours = (millis() - start3) / 3600000.0;
+    energy3 += BULB_POWER * hours;
 
+    EEPROM.put(ADDR3, energy3);
+    EEPROM.commit();
 
-Where:
-- **E** = Energy (kWh)
-- **P** = Power of appliance (Watts)
-- **t** = Time of usage (hours)
+    Serial.print("Bulb3 Energy: ");
+    Serial.println(energy3);
+  }
+  return true;
+}
 
-Electricity bill estimation:
+void setup() {
+  Serial.begin(115200);
 
-Cost = Energy × Tariff Rate
+  EEPROM.begin(512);
 
+  // Load saved values
+  EEPROM.get(ADDR1, energy1);
+  EEPROM.get(ADDR2, energy2);
+  EEPROM.get(ADDR3, energy3);
 
----
+  Serial.println("Loaded Saved Energy Values");
 
-## 📊 Output
-The system provides:
-- **Voice-controlled appliance switching**
-- **Remote control via mobile application**
-- **LCD display showing appliance status**
-- **Energy consumption monitoring**
-- **Estimated electricity bill**
+  pinMode(RELAY_PIN_1, OUTPUT);
+  pinMode(RELAY_PIN_2, OUTPUT);
+  pinMode(RELAY_PIN_3, OUTPUT);
 
----
+  pinMode(DISPLAY_BTN, INPUT_PULLUP);
+  pinMode(RESET_BTN, INPUT_PULLUP);
 
-## 📷 Prototype
-The prototype consists of:
-- NodeMCU microcontroller
-- Relay module controlling three bulbs
-- LCD display
-- Push buttons for manual control
+  digitalWrite(RELAY_PIN_1, HIGH);
+  digitalWrite(RELAY_PIN_2, HIGH);
+  digitalWrite(RELAY_PIN_3, HIGH);
 
----
+  // Custom I2C pins
+  Wire.begin(D6, D7);
 
-## 📚 Learning Outcomes
-- Learned **IoT device programming using NodeMCU (ESP8266)**.
-- Understood integration of **cloud platforms like Sinric Pro**.
-- Developed skills in **interfacing relays, LCDs, and push buttons**.
-- Gained knowledge of **voice-controlled automation systems**.
-- Learned **basic energy monitoring and bill estimation techniques**.
+  lcd.init();
+  lcd.backlight();
 
----
+  lcd.print("Connecting WiFi");
+  Serial.println("Connecting WiFi...");
 
-## ⚠️ Limitations
-- The system currently supports only **three appliances**.
-- Energy monitoring is **basic and approximate**.
-- Remote operation requires a **stable internet connection**.
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
----
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
 
-## 🚀 Future Enhancements
-- Support for more appliances.
-- Advanced energy analytics with historical data.
-- Mobile application with improved UI.
-- Integration of additional sensors such as **temperature and humidity sensors**.
+  lcd.clear();
+  lcd.print("WiFi Connected");
+  Serial.println("\nWiFi Connected!");
 
----
+  SinricProSwitch &bulb1 = SinricPro[device_ID_1];
+  SinricProSwitch &bulb2 = SinricPro[device_ID_2];
+  SinricProSwitch &bulb3 = SinricPro[device_ID_3];
 
-## 🔒 Safety Precautions
-- Ensure proper insulation for all electrical connections.
-- Avoid direct contact with live wires.
-- Use proper circuit protection and fuses.
-- Disconnect power before modifying the circuit.
+  bulb1.onPowerState(onPowerState1);
+  bulb2.onPowerState(onPowerState2);
+  bulb3.onPowerState(onPowerState3);
 
----
+  SinricPro.begin(APP_KEY, APP_SECRET);
+}
 
-## 📌 Applications
-- Smart homes
-- Office automation
-- Energy management systems
-- Elderly assistance systems
-- Educational IoT demonstrations
+void loop() {
+  SinricPro.handle();
 
----
+  float totalEnergy = energy1 + energy2 + energy3;
+  float bill = totalEnergy * RATE;
 
-## 📄 License
-This project is created for **educational and academic purposes**.
+  bool currentState = digitalRead(DISPLAY_BTN);
 
+  // Detect button press
+  if (lastButtonState == HIGH && currentState == LOW) {
+
+    displayMode = !displayMode;
+    lcd.clear();
+
+    if (displayMode == 0) {
+      // SCREEN 1
+      lcd.setCursor(0,0);
+      lcd.print("Units:");
+      lcd.print(totalEnergy);
+
+      lcd.setCursor(0,1);
+      lcd.print("Bill Rs:");
+      lcd.print(bill);
+
+      Serial.println("SCREEN 1: Units & Bill");
+      Serial.print("Units: "); Serial.println(totalEnergy);
+      Serial.print("Bill: "); Serial.println(bill);
+    } 
+    else {
+      // SCREEN 2
+      lcd.setCursor(0,0);
+      lcd.print("Smart Energy");
+
+      lcd.setCursor(0,1);
+      lcd.print("System Ready");
+
+      Serial.println("SCREEN 2: Message Displayed");
+    }
+
+    delay(300); // debounce
+  }
+
+  lastButtonState = currentState;
+
+  // RESET BUTTON
+  if (digitalRead(RESET_BTN) == LOW) {
+    energy1 = energy2 = energy3 = 0;
+
+    EEPROM.put(ADDR1, energy1);
+    EEPROM.put(ADDR2, energy2);
+    EEPROM.put(ADDR3, energy3);
+    EEPROM.commit();
+
+    lcd.clear();
+    lcd.print("RESET DONE");
+
+    Serial.println("RESET DONE");
+
+    delay(2000);
+  }
+}
